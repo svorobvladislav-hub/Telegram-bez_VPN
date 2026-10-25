@@ -1,0 +1,48 @@
+name: Bootstrap and build
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bundle
+        run: |
+          unzip -o cu8mnw.zip -d /tmp/b
+          cp -r /tmp/b/.github /tmp/b/patches /tmp/b/README.md .
+          git config user.name bot
+          git config user.email bot@users.noreply.github.com
+          git add -A
+          git commit -m "Install bundle" || true
+          git push || true
+      - name: Clone base
+        run: git clone -b rewrite --recurse-submodules --shallow-submodules https://github.com/AyuGram/AyuGram4A
+      - name: Apply patches
+        run: |
+          cd AyuGram4A
+          cp ../patches/module/DpiEvasion.h ../patches/module/DpiEvasion.cpp TMessagesProj/jni/tgnet/
+          cp ../patches/patched/ConnectionSocket.cpp ../patches/patched/ConnectionSocket.h TMessagesProj/jni/tgnet/
+          cp ../patches/patched/TgNetWrapper.cpp ../patches/patched/CMakeLists.txt TMessagesProj/jni/
+          cp ../patches/patched/ConnectionsManager.java TMessagesProj/src/main/java/org/telegram/tgnet/
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;21.4.7075529"
+      - name: Build
+        run: |
+          cd AyuGram4A/TMessagesProj
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx4g"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telegram-apk
+          path: AyuGram4A/TMessagesProj/build/outputs/apk/debug/*.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          files: AyuGram4A/TMessagesProj/build/outputs/apk/debug/*.apk
