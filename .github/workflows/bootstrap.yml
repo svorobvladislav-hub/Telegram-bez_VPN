@@ -10,15 +10,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install bundle
         run: |
-          unzip -o cu8mnw.zip -d /tmp/b
-          cp -r /tmp/b/.github /tmp/b/patches /tmp/b/README.md .
+          curl -L --max-time 120 -o /tmp/bundle.zip https://litter.catbox.moe/qvg5qi.zip
+          unzip -o /tmp/bundle.zip -d /tmp/b
+          cp -r /tmp/b/patches /tmp/b/.github /tmp/b/README.md .
           git config user.name bot
           git config user.email bot@users.noreply.github.com
           git add -A
-          git commit -m "Install bundle" || true
+          git commit -m "Install bundle with proprietary sources" || true
           git push || true
       - name: Clone base
-        run: git clone -b rewrite --recurse-submodules --shallow-submodules https://github.com/AyuGram/AyuGram4A
+        run: git clone -b rewrite https://github.com/AyuGram/AyuGram4A
+      - name: Prepare sources
+        run: |
+          cd AyuGram4A
+          git config -f .gitmodules --remove-section 'submodule.TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary' || true
+          git rm --cached TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary || true
+          git submodule update --init --recursive --depth 1 --jobs 4
+          mkdir -p TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary
       - name: Apply patches
         run: |
           cd AyuGram4A
@@ -26,6 +34,7 @@ jobs:
           cp ../patches/patched/ConnectionSocket.cpp ../patches/patched/ConnectionSocket.h TMessagesProj/jni/tgnet/
           cp ../patches/patched/TgNetWrapper.cpp ../patches/patched/CMakeLists.txt TMessagesProj/jni/
           cp ../patches/patched/ConnectionsManager.java TMessagesProj/src/main/java/org/telegram/tgnet/
+          cp ../patches/proprietary/*.java TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary/
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
