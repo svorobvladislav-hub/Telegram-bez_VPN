@@ -1,0 +1,43 @@
+--- /dev/fd/63	2026-10-25 15:55:23.979544064 +0000
++++ CMakeLists.txt	2026-10-25 15:52:50.768742745 +0000
+@@ -69,7 +69,8 @@
+         tgnet/TLObject.cpp
+         tgnet/ProxyCheckInfo.cpp
+         tgnet/Handshake.cpp
+-        tgnet/Config.cpp)
++        tgnet/Config.cpp
++        tgnet/DpiEvasion.cpp)
+ target_compile_options(tgnet PUBLIC
+         -Wall -frtti -finline-functions -ffast-math -Os)
+ set_target_properties(tgnet PROPERTIES
+--- /dev/fd/63	2026-10-25 15:55:24.027544064 +0000
++++ TgNetWrapper.cpp	2026-10-25 15:52:50.768742745 +0000
+@@ -433,6 +433,10 @@
+     }
+ }
+ 
++extern "C" JNIEXPORT void JNICALL setDpiEvasionMode(JNIEnv *env, jclass class_, jint instance, jint mode) {
++    tgnet::DpiEvasion::setMode(mode);
++}
++
+ static const char *ConnectionsManagerClassPathName = "org/telegram/tgnet/ConnectionsManager";
+ static JNINativeMethod ConnectionsManagerMethods[] = {
+         {"native_getCurrentTimeMillis", "(I)J", (void *) getCurrentTimeMillis},
+@@ -458,6 +462,7 @@
+         {"native_resumeNetwork", "(IZ)V", (void *) resumeNetwork},
+         {"native_updateDcSettings", "(I)V", (void *) updateDcSettings},
+         {"native_setIpStrategy", "(IB)V", (void *) setIpStrategy},
++        {"native_setDpiEvasionMode", "(II)V", (void *) setDpiEvasionMode},
+         {"native_setNetworkAvailable", "(IZIZ)V", (void *) setNetworkAvailable},
+         {"native_setPushConnectionEnabled", "(IZ)V", (void *) setPushConnectionEnabled},
+         {"native_setJava", "(Z)V", (void *) setJava},
+--- /dev/fd/63	2026-10-25 15:55:24.079544064 +0000
++++ ConnectionsManager.java	2026-10-25 15:52:50.768742745 +0000
+@@ -846,6 +846,7 @@
+         }
+     }
+ 
++    public static native void native_setDpiEvasionMode(int currentAccount, int mode);
+     public static native void native_switchBackend(int currentAccount, boolean restart);
+     public static native int native_isTestBackend(int currentAccount);
+     public static native void native_pauseNetwork(int currentAccount);

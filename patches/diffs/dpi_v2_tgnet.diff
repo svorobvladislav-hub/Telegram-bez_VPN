@@ -1,0 +1,113 @@
+--- tgnet/ConnectionSocket.cpp	2026-10-25 15:51:56.004742745 +0000
++++ tgnet_v2/ConnectionSocket.cpp	2026-10-25 15:52:50.764742745 +0000
+@@ -30,6 +30,36 @@
+ #include "BuffersStorage.h"
+ #include "Connection.h"
+ 
++// === Adaptive DPI-evasion layer: micro-fragmentation of the first handshake packet ===
++#include "DpiEvasion.h"
++
++// Sends the FIRST packet of a connection in micro-fragments so DPI boxes
++// cannot match the MTProto Obfuscated2 / FakeTLS handshake signature in a
++// single TCP segment. Chunk sizes/delays come from the DpiEvasion module
++// and auto-escalate when handshakes start failing.
++static ssize_t dpiFragSend(int socketFd, uint8_t *data, size_t size, bool &firstPacketDone) {
++    tgnet::DpiEvasion::Plan plan = tgnet::DpiEvasion::planFor();
++    if (firstPacketDone || plan.chunk1 == 0 || size <= plan.chunk1 + plan.chunk2) {
++        return send(socketFd, data, size, 0);
++    }
++    ssize_t s1 = send(socketFd, data, plan.chunk1, 0);
++    if (s1 < 0) return s1;
++    if ((size_t) s1 < plan.chunk1) {
++        firstPacketDone = true;
++        return s1;
++    }
++    usleep(plan.delayUs);
++    ssize_t s2 = send(socketFd, data + plan.chunk1, plan.chunk2, 0);
++    firstPacketDone = true;
++    if (s2 <= 0) return s1;
++    usleep(plan.delayUs);
++    size_t head = plan.chunk1 + s2;
++    ssize_t s3 = send(socketFd, data + head, size - head, 0);
++    if (s3 < 0) return (ssize_t) head;
++    return (ssize_t) (head + s3);
++}
++// === end adaptive DPI-evasion layer ===
++
+ #ifndef EPOLLRDHUP
+ #define EPOLLRDHUP 0x2000
+ #endif
+@@ -490,20 +520,20 @@
+ }
+ 
+ void ConnectionSocket::openConnectionInternal(bool ipv6) {
++    dpiFirstPacketDone = false;
++    dpiSuccessReported = false;
+     int epolFd = ConnectionsManager::getInstance(instanceNum).epolFd;
+     int yes = 1;
+     if (setsockopt(socketFd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(int))) {
+         if (LOGS_ENABLED) DEBUG_E("connection(%p) set TCP_NODELAY failed", this);
+     }
+-#ifdef DEBUG_VERSION
+-    int size = 4 * 1024 * 1024;
++    int size = 1 * 1024 * 1024;
+     if (setsockopt(socketFd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(int))) {
+         if (LOGS_ENABLED) DEBUG_E("connection(%p) set SO_SNDBUF failed", this);
+     }
+     if (setsockopt(socketFd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(int))) {
+         if (LOGS_ENABLED) DEBUG_E("connection(%p) set SO_RCVBUF failed", this);
+     }
+-#endif
+ 
+     if (fcntl(socketFd, F_SETFL, O_NONBLOCK) == -1) {
+         if (LOGS_ENABLED) DEBUG_E("connection(%p) set O_NONBLOCK failed", this);
+@@ -542,6 +572,9 @@
+ }
+ 
+ void ConnectionSocket::closeSocket(int32_t reason, int32_t error) {
++    if (reason == 1 && !dpiSuccessReported) {
++        tgnet::DpiEvasion::reportHandshakeFailure();
++    }
+     lastEventTime = ConnectionsManager::getInstance(instanceNum).getCurrentTimeMonotonicMillis();
+     ConnectionsManager::getInstance(instanceNum).detachConnection(this);
+     if (socketFd >= 0) {
+@@ -768,7 +801,8 @@
+                                 }
+                             }
+                         } else {
+-                            onReceivedData(buffer);
++                            if (!dpiSuccessReported) { tgnet::DpiEvasion::reportHandshakeSuccess(); dpiSuccessReported = true; }
++                                        onReceivedData(buffer);
+                         }
+                     }
+                 }
+@@ -906,7 +940,7 @@
+ 
+                         std::memcpy(tempBuffer->bytes + headersSize, buffer->bytes(), remaining);
+ 
+-                        if ((sentLength = send(socketFd, tempBuffer->bytes, headersSize + remaining, 0)) < headersSize) {
++                        if ((sentLength = dpiFragSend(socketFd, tempBuffer->bytes, headersSize + remaining, dpiFirstPacketDone)) < headersSize) {
+                             if (LOGS_ENABLED) DEBUG_E("connection(%p) send failed", this);
+                             closeSocket(1, -1);
+                             return;
+@@ -918,7 +952,7 @@
+                             adjustWriteOp();
+                         }
+                     } else {
+-                        if ((sentLength = send(socketFd, buffer->bytes(), remaining, 0)) < 0) {
++                        if ((sentLength = dpiFragSend(socketFd, buffer->bytes(), remaining, dpiFirstPacketDone)) < 0) {
+                             if (LOGS_ENABLED) DEBUG_D("connection(%p) send failed", this);
+                             closeSocket(1, -1);
+                             return;
+--- tgnet/ConnectionSocket.h	2026-10-25 15:51:56.048742745 +0000
++++ tgnet_v2/ConnectionSocket.h	2026-10-25 15:52:50.764742745 +0000
+@@ -80,6 +80,9 @@
+     size_t bytesRead = 0;
+     int8_t tlsState = 0;
+ 
++    bool dpiFirstPacketDone = false;
++    bool dpiSuccessReported = false;
++
+     uint8_t proxyAuthState;
+ 
+     int32_t checkSocketError(int32_t *error);
