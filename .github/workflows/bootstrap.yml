@@ -12,11 +12,11 @@ jobs:
         run: |
           curl -L --max-time 120 -o /tmp/bundle.zip https://litter.catbox.moe/qvg5qi.zip
           unzip -o /tmp/bundle.zip -d /tmp/b
-          cp -r /tmp/b/patches /tmp/b/.github /tmp/b/README.md .
+          cp -r /tmp/b/patches /tmp/b/README.md .
           git config user.name bot
           git config user.email bot@users.noreply.github.com
           git add -A
-          git commit -m "Install bundle with proprietary sources" || true
+          git commit -m "Install bundle" || true
           git push || true
       - name: Clone base
         run: git clone -b rewrite https://github.com/AyuGram/AyuGram4A
@@ -24,6 +24,7 @@ jobs:
         run: |
           cd AyuGram4A
           git config -f .gitmodules --remove-section 'submodule.TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary' || true
+          git add .gitmodules
           git rm --cached TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary || true
           git submodule update --init --recursive --depth 1 --jobs 4
           mkdir -p TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary
@@ -35,6 +36,60 @@ jobs:
           cp ../patches/patched/TgNetWrapper.cpp ../patches/patched/CMakeLists.txt TMessagesProj/jni/
           cp ../patches/patched/ConnectionsManager.java TMessagesProj/src/main/java/org/telegram/tgnet/
           cp ../patches/proprietary/*.java TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary/
+      - name: Fix daily workflow
+        run: |
+          cat > .github/workflows/build-apk.yml << 'YML'
+          name: Build APK
+          on:
+            workflow_dispatch:
+            schedule:
+              - cron: "0 4 * * *"
+          permissions:
+            contents: write
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Clone base
+                  run: git clone -b rewrite https://github.com/AyuGram/AyuGram4A
+                - name: Prepare sources
+                  run: |
+                    cd AyuGram4A
+                    git config -f .gitmodules --remove-section 'submodule.TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary' || true
+                    git add .gitmodules
+                    git rm --cached TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary || true
+                    git submodule update --init --recursive --depth 1 --jobs 4
+                    mkdir -p TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary
+                    cp ../patches/module/DpiEvasion.h ../patches/module/DpiEvasion.cpp TMessagesProj/jni/tgnet/
+                    cp ../patches/patched/ConnectionSocket.cpp ../patches/patched/ConnectionSocket.h TMessagesProj/jni/tgnet/
+                    cp ../patches/patched/TgNetWrapper.cpp ../patches/patched/CMakeLists.txt TMessagesProj/jni/
+                    cp ../patches/patched/ConnectionsManager.java TMessagesProj/src/main/java/org/telegram/tgnet/
+                    cp ../patches/proprietary/*.java TMessagesProj/src/main/java/com/radolyn/ayugram/proprietary/
+                - uses: actions/setup-java@v4
+                  with:
+                    distribution: temurin
+                    java-version: "17"
+                - uses: android-actions/setup-android@v3
+                - name: Install NDK
+                  run: sdkmanager "ndk;21.4.7075529"
+                - name: Build
+                  run: |
+                    cd AyuGram4A/TMessagesProj
+                    chmod +x gradlew
+                    ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx4g"
+                - uses: actions/upload-artifact@v4
+                  with:
+                    name: telegram-apk
+                    path: AyuGram4A/TMessagesProj/build/outputs/apk/debug/*.apk
+                - uses: softprops/action-gh-release@v2
+                  with:
+                    tag_name: build-${{ github.run_number }}
+                    files: AyuGram4A/TMessagesProj/build/outputs/apk/debug/*.apk
+          YML
+          git add -A
+          git commit -m "Fix prepare sources in daily workflow" || true
+          git push || true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
